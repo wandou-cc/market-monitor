@@ -1,15 +1,35 @@
 const { createExchange } = require('../createExchange');
 const { safeFetchTickers } = require('@utils/safeFetchTickers')
 const { safeFundingRates } = require('@utils/safeFundingRates')
-const { RestClientV2 } = require('bitget-api')
+// const { RestClientV2 } = require('bitget-api')
 const { formatTime } = require('@utils/utils')
+const pLimit = require('p-limit').default;
 
+// const restClient = new RestClientV2({
+//   apiKey: process.env.BITGET_API_KEY,
+//   apiSecret: process.env.BITGET_SECRET_KEY,
+//   apiPass: process.env.BITGET_PASSPHRASE,
+// })
 
-const restClient = new RestClientV2({
-  apiKey: process.env.BITGET_API_KEY,
-  apiSecret: process.env.BITGET_SECRET_KEY,
-  apiPass: process.env.BITGET_PASSPHRASE,
-})
+async function fetchFundingRatesIndividuallyWithLimit(exchange, symbols, concurrency = 5) {
+  const limit = pLimit(concurrency);
+  const results = {};
+
+  const tasks = symbols.map(symbol =>
+    limit(async () => {
+      try {
+        const rate = await exchange.fetchFundingRate(symbol);
+        results[symbol] = rate;
+      } catch (err) {
+        console.warn(`[${exchange.id}] 获取 ${symbol} fundingRate 失败: ${err.message}`);
+      }
+    })
+  );
+
+  await Promise.allSettled(tasks);
+  return results;
+}
+
 
 async function fetchBitgetPrices() {
   const results = {
@@ -34,16 +54,15 @@ async function fetchBitgetPrices() {
     }
 
     // 合约
-    // const swapTickers = await safeFetchTickers(exchange, swapSymbols, 'swap');
     const swapFundingRates = await safeFundingRates(exchange, swapSymbols, 'swap');
+    // bitget 获取下个资金费率结算周期需要一个一个获取 非常影响速度 看后续是否有必要改成只获取监听列表中的
+    // const fundingRates = await fetchFundingRatesIndividuallyWithLimit(exchange, swapSymbols, 30);
     for (const [symbol, ticker] of Object.entries(swapFundingRates)) {
       results.swap[symbol] = {
         ...ticker,
         fundingRateFormat: (ticker.fundingRate * 100).toFixed(4) + "%",
-        nextFundingTimeFormat: await restClient.getFuturesNextFundingTime({
-          symbol: symbol.replace(':USDT', '').replace('/', ''),
-          type: 'USDT-FUTURES'
-        }),
+        // nextFundingTimeFormat: formatTime(fundingRates[symbol]['info']['nextUpdate'],"HH:mm:ss"),
+        nextFundingTimeFormat: '-',
         timeFormat: formatTime(ticker?.info?.ts, "HH:mm:ss")
       };
     }
