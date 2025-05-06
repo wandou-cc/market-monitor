@@ -1,8 +1,11 @@
 const express = require('express');
 const app = express();
-const pricesRoute = require('./api/prices');
+require('module-alias/register');
+const dotenv = require('dotenv');
+dotenv.config();
 
-app.use('/api', pricesRoute);
+const markets = require('./api/markets');
+app.use('/api', markets);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

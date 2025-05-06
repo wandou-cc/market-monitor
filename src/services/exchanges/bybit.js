@@ -3,14 +3,14 @@ const { safeFetchTickers } = require("@utils/safeFetchTickers");
 const { safeFundingRates } = require("@utils/safeFundingRates");
 const { formatTime } = require("@utils/utils");
 
-async function fetchBinancePrices() {
+async function fetchBybitPrices() {
   const results = {
     spot: {},
     swap: {},
   };
 
   try {
-    const exchange = createExchange("binance");
+    const exchange = createExchange("bybit");
     const markets = await exchange.loadMarkets(true);
     // 现货
     const spotSymbols = Object.values(markets)
@@ -20,28 +20,22 @@ async function fetchBinancePrices() {
     // 合约
     const swapSymbols = Object.values(markets)
       .filter(
-        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT") 
+        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
       )
       .map((item) => item.symbol);
 
-    const spotTickers = await safeFetchTickers(exchange, spotSymbols, "spot");
+    const spotTickers = await safeFetchTickers(exchange, spotSymbols, 'spot');
     for (const [symbol, ticker] of Object.entries(spotTickers)) {
       results.spot[symbol] = ticker
     }
 
     // 合约
     // const swapTickers = await safeFetchTickers(exchange, swapSymbols, 'swap');
-    const allSwapFundingRates = await safeFundingRates(
+    const swapFundingRates = await safeFundingRates(
       exchange,
       swapSymbols,
       "swap"
-    )
-	const swapFundingRates = Object.fromEntries(
-		Object.entries(allSwapFundingRates).filter(
-			([_, value]) => value.estimatedSettlePrice !== 0
-		)
-	);
-
+    );
     for (const [symbol, ticker] of Object.entries(swapFundingRates)) {
       results.swap[symbol] = {
         ...ticker,
@@ -50,14 +44,14 @@ async function fetchBinancePrices() {
           ticker?.info?.nextFundingTime,
           "HH:mm:ss"
         ),
-        timeFormat: formatTime(ticker?.info?.time, "HH:mm:ss")
+        timeFormat: formatTime(ticker?.timestamp, "HH:mm:ss")
       };
     }
   } catch (err) {
-    console.error(`[Binance] fetchPrices 出错: ${err.message}`);
+    console.error(`[Bybit] fetchPrices 出错: ${err.message}`);
   }
 
   return results;
 }
 
-module.exports = { fetchBinancePrices };
+module.exports = { fetchBybitPrices };

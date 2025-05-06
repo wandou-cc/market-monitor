@@ -1,4 +1,3 @@
-require('dotenv').config();
 const ccxt = require('ccxt');
 
 function createExchange(id,cexOptions) {
