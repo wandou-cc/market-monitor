@@ -3,110 +3,126 @@ const router = express.Router();
 const { fetchFundingRates, initExchanges } = require('../services/fetchAll');
 const exchangesJson = require('../../config/exchanges.json');
 
-function getFundingArbitrageOpportunities(data) {
-	const symbolMap = {};
-  
-	// Step 1: 聚合各交易所的 fundingRate 和 markPrice
-	for (const [exchange, { swap }] of Object.entries(data)) {
-	  for (const [symbol, market] of Object.entries(swap)) {
-		if (!symbolMap[symbol]) {
-		  symbolMap[symbol] = [];
-		}
-  
-		const fundingRate = market.fundingRate ?? 0;
-		const markPrice = market.markPrice ?? 0;
-		const diffMs = Number(market.diffMs ?? Infinity);
-  
-		symbolMap[symbol].push({
-		  exchange,
-		  fundingRate,
-		  markPrice,
-		  diffMs,
-		});
-	  }
-	}
-  
-	const results = [];
-  
-	// Step 2: 处理每个币种的套利机会
-	for (const [symbol, markets] of Object.entries(symbolMap)) {
-	  if (markets.length < 2) continue;
-  
-	  const sorted = [...markets].sort((a, b) => b.fundingRate - a.fundingRate);
-	  const a = sorted[0];
-	  const b = sorted[sorted.length - 1];
-  
-	  let longExchange, shortExchange;
-  
-	  // 智能判断做多做空策略
-	  if (a.fundingRate < 0 && b.fundingRate >= 0) {
-		longExchange = a;
-		shortExchange = b;
-	  } else if (a.fundingRate >= 0 && b.fundingRate < 0) {
-		longExchange = b;
-		shortExchange = a;
-	  } else if (a.fundingRate < 0 && b.fundingRate < 0) {
-		// 两者都为负，绝对值大的做多
-		if (Math.abs(a.fundingRate) > Math.abs(b.fundingRate)) {
-		  longExchange = a;
-		  shortExchange = b;
-		} else {
-		  longExchange = b;
-		  shortExchange = a;
-		}
-	  } else {
-		// 两者都为正，值小的做多
-		if (a.fundingRate < b.fundingRate) {
-		  longExchange = a;
-		  shortExchange = b;
-		} else {
-		  longExchange = b;
-		  shortExchange = a;
-		}
-	  }
-  
-	  const netFundingRate = shortExchange.fundingRate - longExchange.fundingRate;
-	  const priceDifferenceRate =
-		(shortExchange.markPrice - longExchange.markPrice) / longExchange.markPrice;
-  
-	  results.push({
-		symbol,
-		longPositionExchange: longExchange.exchange,
-		shortPositionExchange: shortExchange.exchange,
-  
-		longFundingRate: longExchange.fundingRate,
-		shortFundingRate: shortExchange.fundingRate,
-		netFundingRate,
-		priceDifferenceRate,
-  
-		diffMs: Math.min(longExchange.diffMs, shortExchange.diffMs),
-  
-		// 可选：格式化展示字段
-		longFundingRateFormat: (longExchange.fundingRate * 100).toFixed(4) + '%',
-		shortFundingRateFormat: (shortExchange.fundingRate * 100).toFixed(4) + '%',
-		netFundingRateFormat: (netFundingRate * 100).toFixed(4) + '%',
-		priceDifferenceRateFormat: (priceDifferenceRate * 100).toFixed(4) + '%',
-	  });
-	}
-  
-	// Step 3: 排序，先 diffMs 升序，再 netFundingRate 降序
-	return results.sort((a, b) => {
-	  if (a.diffMs === b.diffMs) {
-		return b.netFundingRate - a.netFundingRate;
-	  }
-	  return a.diffMs - b.diffMs;
-	});
+function formatRate(rate) {
+	return (rate * 100).toFixed(4) + '%';
 }
 
-router.get('/getFundingRates', async (req, res) => {
-  const results = {};
-  await initExchanges(); // 获取市场数据
-  for (const exchangeId of exchangesJson.exchanges) {
-    const result = await fetchFundingRates(exchangeId);
-    results[exchangeId] = result
+
+function findArbitrageOpportunities(data) {
+	const symbolMap = {};
+	for (const [exchange, symbols] of Object.entries(data)) {
+	  for (const [symbol, info] of Object.entries(symbols)) {
+		const fr = info.fundingRate;
+		const mp = info.markPrice;
+		if (typeof fr !== 'number' || typeof mp !== 'number') continue;
+		if (!symbolMap[symbol]) symbolMap[symbol] = [];
+		symbolMap[symbol].push({ exchange, fundingRate: fr, markPrice: mp });
+	  }
+	}
+  
+	const bestOpportunities = {};
+	const usedSymbols = new Set();
+	const usedPairs = new Set();
+  
+	for (const [symbol, items] of Object.entries(symbolMap)) {
+	  if (items.length < 2) continue;
+  
+	  let maxProfitOpportunity = null;
+  
+	  for (let i = 0; i < items.length; i++) {
+		for (let j = i + 1; j < items.length; j++) {
+		  const e1 = items[i];
+		  const e2 = items[j];
+		  const fr1 = e1.fundingRate;
+		  const fr2 = e2.fundingRate;
+  
+		  let shortEx, longEx;
+  
+		  if (fr1 >= 0 && fr2 < 0) {
+			shortEx = e1; longEx = e2;
+		  } else if (fr2 >= 0 && fr1 < 0) {
+			shortEx = e2; longEx = e1;
+		  } else if (fr1 > 0 && fr2 > 0) {
+			if (fr1 > fr2) { shortEx = e1; longEx = e2; }
+			else           { shortEx = e2; longEx = e1; }
+		  } else if (fr1 < 0 && fr2 < 0) {
+			if (fr1 > fr2) { shortEx = e1; longEx = e2; }
+			else           { shortEx = e2; longEx = e1; }
+		  } else {
+			continue;
+		  }
+  
+		  const profitMargin = shortEx.fundingRate - longEx.fundingRate;
+		  const netFundingRate = shortEx.fundingRate + longEx.fundingRate;
+		  const priceSpread = Math.abs(shortEx.markPrice - longEx.markPrice);
+		  const avgPrice = (shortEx.markPrice + longEx.markPrice) / 2;
+		  const priceSpreadRate = priceSpread / avgPrice;
+  
+		  if (priceSpreadRate < 0.0001) continue;
+  
+		  const key1 = symbol + '-' + shortEx.exchange;
+		  const key2 = symbol + '-' + longEx.exchange;
+		  const pairKey = key1 + '-' + key2;
+  
+		  const opportunity = {
+			symbol,
+			shortExchange: shortEx.exchange,
+			// shortRate: shortEx.fundingRate,
+			shortRateFormat: formatRate(shortEx.fundingRate),
+			longExchange: longEx.exchange,
+			// longRate: longEx.fundingRate,
+			longRateFormat: formatRate(longEx.fundingRate),
+			profitMargin,
+			profitMarginFormat: formatRate(profitMargin),
+			// netFundingRate,
+			// netFundingRateFormat: formatRate(netFundingRate),
+			priceSpreadRate,
+			priceSpreadRateFormat: formatRate(priceSpreadRate)
+		  };
+  
+		  if (
+			(!maxProfitOpportunity || opportunity.profitMargin > maxProfitOpportunity.profitMargin) &&
+			!usedPairs.has(pairKey) &&
+			!usedSymbols.has(symbol)
+		  ) {
+			maxProfitOpportunity = opportunity;
+		  }
+		}
+	  }
+  
+	  if (maxProfitOpportunity) {
+		const key1 = maxProfitOpportunity.symbol + '-' + maxProfitOpportunity.shortExchange;
+		const key2 = maxProfitOpportunity.symbol + '-' + maxProfitOpportunity.longExchange;
+		const pairKey = key1 + '-' + key2;
+  
+		usedSymbols.add(maxProfitOpportunity.symbol);
+		usedPairs.add(pairKey);
+		bestOpportunities[maxProfitOpportunity.symbol] = maxProfitOpportunity;
+	  }
+	}
+  
+	return Object.values(bestOpportunities)
+	  .filter(op => op.priceSpreadRate >= 0.0001)
+	  .sort((a, b) => b.profitMargin - a.profitMargin)
+	  .slice(0, 20);
   }
-  res.json(results);
+  
+  
+  
+
+router.get('/getAllFundingRates', async (req, res) => {
+	const results = {};
+	await initExchanges(); // 获取市场数据
+	for (const exchangeId of exchangesJson.exchanges) {
+		const result = await fetchFundingRates(exchangeId);
+		results[exchangeId] = result
+	}
+	console.table(findArbitrageOpportunities(results))
+	res.json(findArbitrageOpportunities(results));
 });
+
+
+
 
 module.exports = router;
 
