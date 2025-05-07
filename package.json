@@ -1,7 +1,7 @@
 {
   "name": "market-monitor",
   "version": "1.0.0",
-  "description": "Multi-exchange market monitoring system",
+  "description": "资金费率套利监控",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/app.js",

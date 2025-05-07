@@ -1,34 +1,63 @@
-const { fetchBinancePrices } = require('./exchanges/binance');
-const { fetchBybitPrices } = require('./exchanges/bybit')
-const { fetchBitgetPrices } = require('./exchanges/bitget')
-const { fetchGatePrices } = require('./exchanges/gate')
+const Binance = require('./exchanges/binance');
+const Bybit = require('./exchanges/bybit')
+const Bitget = require('./exchanges/bitget')
+const Gate = require('./exchanges/gate')
 
-const exchangeMap = {
-  binance: fetchBinancePrices,
-  bybit: fetchBybitPrices,
-  bitget: fetchBitgetPrices,
-  gate: fetchGatePrices
-};
+let exchangeMap = {};
 
-async function fetchAllPrices(exchangeId) {
+async function initExchanges() {
+  const exchangesJson = require('../../config/exchanges.json').exchanges;
+  
+  exchangeMap = {};
+  
+  if (exchangesJson.includes('binance')) {
+    exchangeMap.binance = await Binance.fetchMarkets();
+  }
+  
+  if (exchangesJson.includes('bybit')) {
+    exchangeMap.bybit = await Bybit.fetchMarkets();
+  }
+  
+  if (exchangesJson.includes('gate')) {
+    exchangeMap.gate = await Gate.fetchMarkets();
+  }
+  
+  if (exchangesJson.includes('bitget')) {
+    exchangeMap.bitget = await Bitget.fetchMarkets();
+  }
+}
+
+// 获取市场信息
+async function fetchMarkets(exchangeId) {
   const fetcher = exchangeMap[exchangeId];
 
   if (!fetcher) {
     return { exchange: exchangeId, error: 'unsupported exchange' };
   }
+  if (!fetcher) {
+    return { exchange: exchangeId, error: 'unsupported exchange' };
+  }
 
   try {
-    const result = await fetcher();
+    const result = await fetcher.fetchMarkets();
     return result;
   } catch (error) {
     return { exchange: exchangeId, error: error.message };
   }
-
-  // const tasks = exchangeList.map(async (exchangeId) => {
-    
-  // });
-
-  // return Promise.all(tasks);
 }
 
-module.exports = { fetchAllPrices };
+// 获取资金费率
+async function fetchFundingRates(exchangeId) {
+  const fetcher = exchangeMap[exchangeId];
+  if (!fetcher) {
+    return { exchange: exchangeId, error: 'unsupported exchange' };
+  }
+  try {
+    const result = await fetcher.fetchFundingRates();
+    return result;
+  } catch (error) {
+    return { exchange: exchangeId, error: error.message };
+  }
+}
+
+module.exports = { initExchanges , fetchFundingRates,fetchMarkets };

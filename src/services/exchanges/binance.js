@@ -3,61 +3,101 @@ const { safeFetchTickers } = require("@utils/safeFetchTickers");
 const { safeFundingRates } = require("@utils/safeFundingRates");
 const { formatTime } = require("@utils/utils");
 
-async function fetchBinancePrices() {
-  const results = {
-    spot: {},
-    swap: {},
-  };
+class Binance {
+  static exchange = null;
+  constructor(markets) {
+    this.markets = markets;
+  }
 
-  try {
+  static async fetchMarkets() {
     const exchange = createExchange("binance");
+    Binance.exchange = exchange;
     const markets = await exchange.loadMarkets(true);
-    // 现货
-    const spotSymbols = Object.values(markets)
-      .filter((item) => item.type === "spot" && item.symbol.endsWith("/USDT"))
-      .map((item) => item.symbol);
+    return new Binance(markets);
+  }
 
-    // 合约
-    const swapSymbols = Object.values(markets)
+  async fetchFundingRates() {
+    const results = {};
+    const swapSymbols = Object.values(this.markets)
       .filter(
-        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT") 
+        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
       )
       .map((item) => item.symbol);
 
-    const spotTickers = await safeFetchTickers(exchange, spotSymbols, "spot");
-    for (const [symbol, ticker] of Object.entries(spotTickers)) {
-      results.spot[symbol] = ticker
-    }
-
-    // 合约
-    // const swapTickers = await safeFetchTickers(exchange, swapSymbols, 'swap');
     const allSwapFundingRates = await safeFundingRates(
-      exchange,
+      Binance.exchange,
       swapSymbols,
       "swap"
-    )
-	const swapFundingRates = Object.fromEntries(
-		Object.entries(allSwapFundingRates).filter(
-			([_, value]) => value.estimatedSettlePrice !== 0
-		)
-	);
+    );
+
+    const swapFundingRates = Object.fromEntries(
+      Object.entries(allSwapFundingRates).filter(
+        ([_, value]) => value.estimatedSettlePrice !== 0
+      )
+    );
 
     for (const [symbol, ticker] of Object.entries(swapFundingRates)) {
-      results.swap[symbol] = {
-        ...ticker,
+      results[symbol] = {
+        exchange: "binance",
+        symbol: ticker.symbol,
+        markPrice: ticker.markPrice,
+        fundingRate: ticker.fundingRate,
         fundingRateFormat: (ticker.fundingRate * 100).toFixed(4) + "%",
+        nextFundingTime: ticker?.info?.nextFundingTime,
         nextFundingTimeFormat: formatTime(
           ticker?.info?.nextFundingTime,
           "HH:mm:ss"
-        ),
-        timeFormat: formatTime(ticker?.info?.time, "HH:mm:ss")
+        )
       };
     }
-  } catch (err) {
-    console.error(`[Binance] fetchPrices 出错: ${err.message}`);
+    return results;
   }
 
-  return results;
-}
+  async fetchMarketsSpot() {
+    const spotSymbols = Object.values(this.markets)
+      .filter((item) => item.type === "spot" && item.symbol.endsWith("/USDT"))
+      .map((item) => item.symbol);
 
-module.exports = { fetchBinancePrices };
+    const spotTickers = await safeFetchTickers(
+      Binance.exchange,
+      spotSymbols,
+      "spot"
+    );
+    const results = {};
+    for (const [symbol, ticker] of Object.entries(spotTickers)) {
+      results[symbol] = ticker;
+    }
+
+    return results;
+  }
+
+  async fetchMarketsSwap() {
+    const swapSymbols = Object.values(this.markets)
+      .filter(
+        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
+      )
+      .map((item) => item.symbol);
+
+    const swapTickers = await safeFetchTickers(
+      this.exchange,
+      swapSymbols,
+      "swap"
+    );
+    const results = {};
+    for (const [symbol, ticker] of Object.entries(swapTickers)) {
+      results[symbol] = ticker;
+    }
+
+    return results;
+  }
+
+  async fetchMarkets() {
+    const spot = await this.fetchMarketsSpot();
+    const swap = await this.fetchMarketsSwap();
+    return {
+      spot,
+      swap,
+    };
+  }
+}
+module.exports = Binance;

@@ -3,53 +3,100 @@ const { safeFetchTickers } = require("@utils/safeFetchTickers");
 const { safeFundingRates } = require("@utils/safeFundingRates");
 const { formatTime, getNextFundingTimestamp } = require("@utils/utils");
 
-async function fetchGatePrices() {
-  const results = {
-    spot: {},
-    swap: {},
-  };
+class Gate {
+  static exchange = null;
+  constructor(markets) {
+    this.markets = markets;
+  }
 
-  try {
+  static async fetchMarkets() {
     const exchange = createExchange("gate");
+    Gate.exchange = exchange;
     const markets = await exchange.loadMarkets(true);
-    // 现货
-    const spotSymbols = Object.values(markets)
-      .filter((item) => item.type === "spot" && item.symbol.endsWith("/USDT"))
-      .map((item) => item.symbol);
+    return new Gate(markets);
+  }
 
-    // 合约
-    const swapSymbols = Object.values(markets)
+  async fetchFundingRates() {
+    const results = {};
+    const swapSymbols = Object.values(this.markets)
       .filter(
         (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
       )
       .map((item) => item.symbol);
 
-    const spotTickers = await safeFetchTickers(exchange, spotSymbols, 'spot');
-    for (const [symbol, ticker] of Object.entries(spotTickers)) {
-      results.spot[symbol] = ticker
-    }
-
-    // 合约
-    // const swapTickers = await safeFetchTickers(exchange, swapSymbols, 'swap');
-    const swapFundingRates = await safeFundingRates(
-      exchange,
+    const allSwapFundingRates = await safeFundingRates(
+      Gate.exchange,
       swapSymbols,
       "swap"
     );
+
+    const swapFundingRates = Object.fromEntries(
+      Object.entries(allSwapFundingRates).filter(
+        ([_, value]) => value.estimatedSettlePrice !== 0 && value.interval.match(/^(\d+)([hm])$/)
+      )
+    );
+
     for (const [symbol, ticker] of Object.entries(swapFundingRates)) {
-      results.swap[symbol] = {
-        ...ticker,
+      const nextFundingTime = getNextFundingTimestamp(ticker.interval).timestamp;
+      results[symbol] = {
+        exchange: "gate",
+        symbol: ticker.symbol,
+        markPrice: ticker.markPrice,
+        fundingRate: ticker.fundingRate,
         fundingRateFormat: (ticker.fundingRate * 100).toFixed(4) + "%",
-        nextFundingTimeFormat: getNextFundingTimestamp(ticker.interval).nextFundingTimeFormat,
-        timeFormat: formatTime(new Date().valueOf(), "HH:mm:ss"),
-        nextFundingRateFormat: (ticker.nextFundingRate * 100).toFixed(4) + "%"
+        interval: ticker.interval,
+        nextFundingTime: nextFundingTime,
+        nextFundingTimeFormat: formatTime(nextFundingTime, "HH:mm:ss"),
       };
     }
-  } catch (err) {
-    console.error(`[Gate] fetchPrices 出错: ${err.message}`);
+    return results;
   }
 
-  return results;
-}
+  async fetchMarketsSpot() {
+    const spotSymbols = Object.values(this.markets)
+      .filter((item) => item.type === "spot" && item.symbol.endsWith("/USDT"))
+      .map((item) => item.symbol);
 
-module.exports = { fetchGatePrices };
+    const spotTickers = await safeFetchTickers(
+      Gate.exchange,
+      spotSymbols,
+      "spot"
+    );
+    const results = {};
+    for (const [symbol, ticker] of Object.entries(spotTickers)) {
+      results[symbol] = ticker;
+    }
+
+    return results;
+  }
+
+  async fetchMarketsSwap() {
+    const swapSymbols = Object.values(this.markets)
+      .filter(
+        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
+      )
+      .map((item) => item.symbol);
+
+    const swapTickers = await safeFetchTickers(
+      Gate.exchange,
+      swapSymbols,
+      "swap"
+    );
+    const results = {};
+    for (const [symbol, ticker] of Object.entries(swapTickers)) {
+      results[symbol] = ticker;
+    }
+
+    return results;
+  }
+
+  async fetchMarkets() {
+    const spot = await this.fetchMarketsSpot();
+    const swap = await this.fetchMarketsSwap();
+    return {
+      spot,
+      swap,
+    };
+  }
+}
+module.exports = Gate;
