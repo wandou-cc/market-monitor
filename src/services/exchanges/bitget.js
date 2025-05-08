@@ -1,57 +1,8 @@
-const pLimit = require("p-limit").default;
 
 const { createExchange } = require("../createExchange");
 const { safeFetchTickers } = require("@utils/safeFetchTickers");
 const { safeFundingRates } = require("@utils/safeFundingRates");
-const { formatTime } = require("@utils/utils");
-
-async function fetchFundingRatesIndividuallyWithLimit(
-  exchange,
-  symbols,
-  concurrency = 10
-) {
-  const limit = pLimit(concurrency);
-  const results = {};
-  const batchSize = 10; // Process symbols in smaller batches for better fault tolerance
-  const symbolBatches = [];
-  const maxRetries = 3;
-  
-  // Create smaller batches of symbols
-  for (let i = 0; i < symbols.length; i += batchSize) {
-    symbolBatches.push(symbols.slice(i, i + batchSize));
-  }
-
-  // Process batches concurrently with limit
-  const tasks = symbolBatches.map((batch) =>
-    limit(async () => {
-      const batchPromises = batch.map(async (symbol) => {
-        let retries = 0;
-        while (retries < maxRetries) {
-          try {
-            const rate = await exchange.fetchFundingRate(symbol);
-            results[symbol] = rate;
-            return;
-          } catch (err) {
-            retries++;
-            if (retries >= maxRetries) {
-              console.warn(
-                `[${exchange.id}] 获取 ${symbol} fundingRate 失败 (重试 ${retries}/${maxRetries}): ${err.message}`
-              );
-            } else {
-              // Wait exponentially longer between retries
-              await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, retries - 1)));
-            }
-          }
-        }
-      });
-      
-      await Promise.allSettled(batchPromises);
-    })
-  );
-
-  await Promise.allSettled(tasks);
-  return results;
-}
+const { fetchFundingRatesIndividuallyWithLimit } = require("@utils/utils");
 
 class Bitget {
   static exchange = null;
@@ -66,6 +17,15 @@ class Bitget {
     return new Bitget(markets);
   }
 
+  async fetchCurrentFundingRates() {
+    const swapSymbols = Object.values(this.markets)
+      .filter(
+        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
+      )
+      .map((item) => item.symbol);
+    return fetchFundingRatesIndividuallyWithLimit(Bitget.exchange, swapSymbols);
+  }
+
   async fetchFundingRates() {
     const results = {};
     const swapSymbols = Object.values(this.markets)
@@ -74,7 +34,6 @@ class Bitget {
       )
       .map((item) => item.symbol);
 
-    // Try to get bulk funding rates first 
     let allSwapFundingRates = {};
     try {
       allSwapFundingRates = await safeFundingRates(
@@ -85,20 +44,6 @@ class Bitget {
     } catch (err) {
       console.warn(`[bitget] Bulk funding rates failed: ${err.message}, falling back to individual requests`);
     }
-
-    // const symbolsToFetch = swapSymbols.filter(symbol => 
-    //   !allSwapFundingRates[symbol] || 
-    //   !allSwapFundingRates[symbol].nextFundingTime
-    // );
-
-    // let individualFundingRates = {};
-    // if (symbolsToFetch.length > 0) {
-    //   individualFundingRates = await fetchFundingRatesIndividuallyWithLimit(
-    //     Bitget.exchange,
-    //     symbolsToFetch,
-    //     30
-    //   );
-    // }
 
     const swapFundingRates = Object.fromEntries(
       Object.entries(allSwapFundingRates).filter(

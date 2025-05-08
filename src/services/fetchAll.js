@@ -5,26 +5,32 @@ const Gate = require('./exchanges/gate')
 
 let exchangeMap = {};
 
-async function initExchanges() {
+async function initExchanges(exchangeId = null) {
   const exchangesJson = require('../../config/exchanges.json').exchanges;
   
   exchangeMap = {};
+
+  const shouldInit = (id) => {
+    return (!exchangeId && exchangesJson.includes(id)) || (exchangeId === id);
+  };
   
-  if (exchangesJson.includes('binance')) {
+  if (shouldInit('binance')) {
     exchangeMap.binance = await Binance.fetchMarkets();
   }
   
-  if (exchangesJson.includes('bybit')) {
+  if (shouldInit('bybit')) {
     exchangeMap.bybit = await Bybit.fetchMarkets();
   }
   
-  if (exchangesJson.includes('gate')) {
+  if (shouldInit('gate')) {
     exchangeMap.gate = await Gate.fetchMarkets();
   }
   
-  if (exchangesJson.includes('bitget')) {
+  if (shouldInit('bitget')) {
     exchangeMap.bitget = await Bitget.fetchMarkets();
   }
+
+  return exchangeMap
 }
 
 // 获取市场信息
@@ -60,4 +66,18 @@ async function fetchFundingRates(exchangeId) {
   }
 }
 
-module.exports = { initExchanges , fetchFundingRates,fetchMarkets };
+// 获取某一个交易所的资金费率信息
+async function fetchCurrentFundingRates(exchangeId) {
+  const fetcher = exchangeMap[exchangeId];
+  if (!fetcher) {
+    return { exchange: exchangeId, error: 'unsupported exchange' };
+  }
+  try {
+    const result = await fetcher.fetchCurrentFundingRates();
+    return result;
+  } catch (error) {
+    return { exchange: exchangeId, error: error.message };
+  }
+}
+
+module.exports = { initExchanges , fetchFundingRates,fetchMarkets,fetchCurrentFundingRates };

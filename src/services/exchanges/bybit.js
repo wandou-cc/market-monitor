@@ -9,6 +9,22 @@ class Bybit {
     this.markets = markets;
   }
 
+  async fetchCurrentFundingRates() {
+    const swapSymbols = Object.values(this.markets)
+      .filter(
+        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
+      )
+      .map((item) => item.symbol);
+
+    const allSwapFundingRates = await safeFundingRates(
+      Bybit.exchange,
+      swapSymbols,
+      "swap"
+    );
+
+    return allSwapFundingRates;
+  }
+
   static async fetchMarkets() {
     const exchange = createExchange("bybit");
     Bybit.exchange = exchange;

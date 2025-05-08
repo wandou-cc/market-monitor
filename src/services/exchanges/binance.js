@@ -16,6 +16,23 @@ class Binance {
     return new Binance(markets);
   }
 
+
+  async fetchCurrentFundingRates() {
+    const swapSymbols = Object.values(this.markets)
+      .filter(
+        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
+      )
+      .map((item) => item.symbol);
+
+    const allSwapFundingRates = await safeFundingRates(
+      Binance.exchange,
+      swapSymbols,
+      "swap"
+    );
+
+    return allSwapFundingRates;
+  }
+
   async fetchFundingRates() {
     const results = {};
     const swapSymbols = Object.values(this.markets)

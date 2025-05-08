@@ -9,6 +9,7 @@ class Gate {
     this.markets = markets;
   }
 
+  // 初始化市场信息
   static async fetchMarkets() {
     const exchange = createExchange("gate");
     Gate.exchange = exchange;
@@ -16,6 +17,24 @@ class Gate {
     return new Gate(markets);
   }
 
+  // 获取资金费率的所有信息 
+  async fetchCurrentFundingRates() {
+    const swapSymbols = Object.values(this.markets)
+      .filter(
+        (item) => item.type === "swap" && item.symbol.endsWith("/USDT:USDT")
+      )
+      .map((item) => item.symbol);
+
+    const allSwapFundingRates = await safeFundingRates(
+      Gate.exchange,
+      swapSymbols,
+      "swap"
+    );
+
+    return allSwapFundingRates;
+  }
+
+  // 获取解析好的资金费信息
   async fetchFundingRates() {
     const results = {};
     const swapSymbols = Object.values(this.markets)
